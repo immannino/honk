@@ -149,11 +149,14 @@ These work with both `status` and `sync`:
 ## Development
 
 ```sh
-go test -race ./...
-go build -o honk .
+make            # list targets
+make check      # what CI runs: gofmt check, go vet, tests with -race
+make test-ci    # tests with your personal git config hidden
+make test-linux # tests in a Linux container with no git identity (needs Docker)
+make build      # ./honk
 ```
 
-The tests build real repos with real remotes in temp directories, so they need `git` on your `PATH`.
+The tests build real repos with real remotes in temp directories, so they need `git` on your `PATH`. `make test-linux` is the closest match to the CI runner. On macOS, git falls back to your account's full name when no identity is configured, which can hide failures that only show up on Linux.
 
 ## License
 

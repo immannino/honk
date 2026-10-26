@@ -43,9 +43,10 @@ func ExitCode(err error) int {
 	return -1
 }
 
-// baseEnv keeps git non-interactive and avoids taking optional locks so that
+// gitEnv keeps git non-interactive and avoids taking optional locks so that
 // inspecting a repo never interferes with an editor or IDE working in it.
-var baseEnv = func() []string {
+// It's built per call so later changes to the process env are honored.
+func gitEnv() []string {
 	env := append(os.Environ(),
 		"GIT_TERMINAL_PROMPT=0",
 		"GIT_OPTIONAL_LOCKS=0",
@@ -56,7 +57,7 @@ var baseEnv = func() []string {
 		env = append(env, "GIT_SSH_COMMAND=ssh -o BatchMode=yes")
 	}
 	return env
-}()
+}
 
 // Run executes git with args inside the repo and returns trimmed stdout.
 func (r Repo) Run(ctx context.Context, args ...string) (string, error) {
@@ -67,7 +68,7 @@ func (r Repo) Run(ctx context.Context, args ...string) (string, error) {
 func (r Repo) RunInput(ctx context.Context, stdin string, args ...string) (string, error) {
 	cmd := exec.CommandContext(ctx, "git", args...)
 	cmd.Dir = r.Path
-	cmd.Env = baseEnv
+	cmd.Env = gitEnv()
 	if stdin != "" {
 		cmd.Stdin = strings.NewReader(stdin)
 	}
