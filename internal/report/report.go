@@ -5,10 +5,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"slices"
 	"strings"
 	"time"
 	"unicode/utf8"
 
+	"github.com/immannino/honk/internal/forge"
 	"github.com/immannino/honk/internal/git"
 )
 
@@ -27,6 +29,7 @@ type TableOptions struct {
 	Color      bool
 	SubjectLen int // truncate commit subjects to this many runes; 0 means 50
 	Now        time.Time
+	Review     bool // show the MR/PR column
 }
 
 // Table writes an aligned, optionally colored table followed by a one-line summary.
@@ -39,12 +42,21 @@ func Table(w io.Writer, statuses []*git.Status, opts TableOptions) error {
 	}
 	p := palette{on: opts.Color}
 
-	rows := [][]string{{
+	header := []string{
 		p.bold("REPO"), p.bold("BRANCH"), p.bold("CHANGES"), p.bold("UPSTREAM"),
 		p.bold("BASE"), p.bold("REBASE"), p.bold("AGE"), p.bold("LAST COMMIT"),
-	}}
+	}
+	if opts.Review {
+		// Insert before AGE so the free-form commit subject stays last.
+		header = slices.Insert(header, 6, p.bold("MR/PR"))
+	}
+	rows := [][]string{header}
 	for _, s := range statuses {
-		rows = append(rows, row(s, p, opts))
+		r := row(s, p, opts)
+		if opts.Review {
+			r = slices.Insert(r, 6, review(s, p))
+		}
+		rows = append(rows, r)
 	}
 
 	if err := writeAligned(w, rows); err != nil {
@@ -125,6 +137,25 @@ func aheadBehind(ahead, behind int, p palette) string {
 		parts = append(parts, p.yellow(fmt.Sprintf("↓%d", behind)))
 	}
 	return strings.Join(parts, " ")
+}
+
+func review(s *git.Status, p palette) string {
+	r := s.Review
+	if r == nil {
+		return p.dim("-")
+	}
+	label := r.Label()
+	switch {
+	case r.Error != "":
+		return p.red(label)
+	case r.State == forge.Merged:
+		return p.magenta(label)
+	case r.State == forge.Open:
+		return p.green(label)
+	case r.State == forge.Closed:
+		return p.yellow(label)
+	}
+	return p.dim(label)
 }
 
 func rebase(s *git.Status, p palette) string {

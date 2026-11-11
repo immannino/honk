@@ -33,7 +33,13 @@ honk ~/code --dirty        # only repos with uncommitted changes
 honk ~/code --behind       # only repos behind their upstream or base
 honk ~/code --only 'api*'  # only repos whose relative path matches a glob
 honk ~/code --json         # machine-readable output
+honk ~/code --filter 'updated > 1d or updated > 2026-01-01'   # by last-commit time
+honk ~/code --review       # show the MR/PR tied to each branch
 ```
+
+`--filter` takes `updated` (time of the last commit) or `age`, compared with `> >= < <= = !=`, combined with `and`/`or` and parentheses. A duration value means that long ago, so `updated > 1d` is "touched within the last day" and `age > 30d` is "untouched for over a month". Dates look like `2026-01-01`. Durations use `m h d w mo y`.
+
+`--review` adds an `MR/PR` column showing whether the checked-out branch has a merge request (GitLab, via `glab`) or pull request (GitHub, via `gh`): `!12 merged`, `#7 open`, `none`, or `?` if the lookup failed (tool missing, not logged in). The forge is picked from the remote's host, so self-hosted GitLab works if the hostname contains `gitlab`. It makes one API call per repo, so it's opt-in. `--merged` implies `--review` and keeps only branches whose MR/PR is already merged, which makes it handy for finding branches to clean up.
 
 | Column | Meaning |
 | --- | --- |

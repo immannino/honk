@@ -7,6 +7,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/immannino/honk/internal/forge"
 )
 
 // RebaseState summarises whether the current branch can be brought up to date with its base.
@@ -63,6 +65,9 @@ type Status struct {
 
 	Rebase        RebaseState `json:"rebase"`
 	ConflictFiles []string    `json:"conflict_files,omitempty"`
+
+	// Review is the MR/PR for this branch; only populated by `--review`.
+	Review *forge.Review `json:"review,omitempty"`
 
 	Fetched    bool   `json:"fetched"`
 	FetchError string `json:"fetch_error,omitempty"`
@@ -296,4 +301,14 @@ func (r Repo) operation(ctx context.Context) string {
 		return "bisect"
 	}
 	return ""
+}
+
+// RemoteURL returns the URL of the remote the branch tracks, falling back to origin.
+func (r Repo) RemoteURL(ctx context.Context, branch string) string {
+	remote, _ := r.Run(ctx, "config", "--get", "branch."+branch+".remote")
+	if remote == "" || remote == "." {
+		remote = "origin"
+	}
+	url, _ := r.Run(ctx, "remote", "get-url", remote)
+	return url
 }

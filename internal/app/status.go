@@ -14,6 +14,8 @@ import (
 
 	"github.com/urfave/cli/v3"
 
+	filterexpr "github.com/immannino/honk/internal/filter"
+	"github.com/immannino/honk/internal/forge"
 	"github.com/immannino/honk/internal/git"
 	"github.com/immannino/honk/internal/report"
 	"github.com/immannino/honk/internal/scan"
@@ -30,6 +32,9 @@ func statusCommand() *cli.Command {
 			&cli.BoolFlag{Name: "json", Usage: "emit JSON instead of a table"},
 			&cli.BoolFlag{Name: "dirty", Usage: "only show repos with uncommitted changes"},
 			&cli.BoolFlag{Name: "behind", Usage: "only show repos behind their upstream or base"},
+			&cli.StringFlag{Name: "filter", Usage: `filter expression, e.g. "updated > 1d or updated > 2026-01-01" (fields: updated, age)`},
+			&cli.BoolFlag{Name: "merged", Usage: "only show branches whose MR/PR is already merged (implies --review)"},
+			&cli.BoolFlag{Name: "review", Aliases: []string{"r"}, Usage: "look up the MR (GitLab, via glab) or PR (GitHub, via gh) for each branch"},
 		}, repoFlags()...),
 		Action: runStatus,
 	}
@@ -54,6 +59,20 @@ func runStatus(ctx context.Context, cmd *cli.Command) error {
 		return err
 	}
 	statuses = filter(statuses, cmd.Bool("dirty"), cmd.Bool("behind"))
+	match, err := filterexpr.Parse(cmd.String("filter"))
+	if err != nil {
+		return fmt.Errorf("bad --filter: %w", err)
+	}
+	now := time.Now()
+	statuses = slices.DeleteFunc(statuses, func(s *git.Status) bool { return !match(s, now) })
+	if cmd.Bool("review") || cmd.Bool("merged") {
+		attachReviews(ctx, statuses, cmd.Int("jobs"), cmd.String("base"))
+	}
+	if cmd.Bool("merged") {
+		statuses = slices.DeleteFunc(statuses, func(s *git.Status) bool {
+			return s.Review == nil || s.Review.State != forge.Merged
+		})
+	}
 
 	if cmd.Bool("json") {
 		return report.JSON(os.Stdout, statuses)
@@ -62,7 +81,7 @@ func runStatus(ctx context.Context, cmd *cli.Command) error {
 		fmt.Fprintf(os.Stderr, "no matching git repositories under %s\n", absRoot)
 		return nil
 	}
-	return report.Table(os.Stdout, statuses, report.TableOptions{Color: useColor(cmd)})
+	return report.Table(os.Stdout, statuses, report.TableOptions{Color: useColor(cmd), Review: cmd.Bool("review") || cmd.Bool("merged")})
 }
 
 // collect scans the DIR argument for repos and inspects each one, returning
@@ -201,4 +220,27 @@ func (p *progress) clear() {
 	if p.tty {
 		fmt.Fprint(os.Stderr, "\r\x1b[K")
 	}
+}
+
+// attachReviews looks up the MR/PR for each repo's checked-out branch. It runs
+// after filtering so only the repos being shown cost a network call.
+func attachReviews(ctx context.Context, statuses []*git.Status, jobs int, baseOverride string) {
+	sem := make(chan struct{}, max(jobs, 1))
+	var wg sync.WaitGroup
+	for _, s := range statuses {
+		if s.Error != "" || s.Detached || s.Branch == "" {
+			continue
+		}
+		wg.Go(func() {
+			sem <- struct{}{}
+			defer func() { <-sem }()
+			repo := git.Repo{Path: s.Path}
+			kind := forge.Detect(repo.RemoteURL(ctx, s.Branch))
+			if kind == forge.Unknown {
+				return
+			}
+			s.Review = forge.Lookup(ctx, s.Path, kind, s.Branch)
+		})
+	}
+	wg.Wait()
 }
