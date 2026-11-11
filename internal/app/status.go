@@ -33,6 +33,7 @@ func statusCommand() *cli.Command {
 			&cli.BoolFlag{Name: "dirty", Usage: "only show repos with uncommitted changes"},
 			&cli.BoolFlag{Name: "behind", Usage: "only show repos behind their upstream or base"},
 			&cli.StringFlag{Name: "filter", Usage: `filter expression, e.g. "updated > 1d or updated > 2026-01-01" (fields: updated, age)`},
+			&cli.StringFlag{Name: "quiet", Aliases: []string{"q"}, Usage: `print only these columns, no header or summary (default "REPO"); e.g. -q REPO,BRANCH. Columns: ` + strings.Join(report.Columns, ", ")},
 			&cli.BoolFlag{Name: "merged", Usage: "only show branches whose MR/PR is already merged (implies --review)"},
 			&cli.BoolFlag{Name: "review", Aliases: []string{"r"}, Usage: "look up the MR (GitLab, via glab) or PR (GitHub, via gh) for each branch"},
 		}, repoFlags()...),
@@ -65,7 +66,14 @@ func runStatus(ctx context.Context, cmd *cli.Command) error {
 	}
 	now := time.Now()
 	statuses = slices.DeleteFunc(statuses, func(s *git.Status) bool { return !match(s, now) })
-	if cmd.Bool("review") || cmd.Bool("merged") {
+	var quietCols []string
+	if cmd.IsSet("quiet") {
+		quietCols, err = report.ParseColumns(cmd.String("quiet"))
+		if err != nil {
+			return fmt.Errorf("bad --quiet: %w", err)
+		}
+	}
+	if cmd.Bool("review") || cmd.Bool("merged") || slices.Contains(quietCols, "MR/PR") {
 		attachReviews(ctx, statuses, cmd.Int("jobs"), cmd.String("base"))
 	}
 	if cmd.Bool("merged") {
@@ -77,9 +85,15 @@ func runStatus(ctx context.Context, cmd *cli.Command) error {
 	if cmd.Bool("json") {
 		return report.JSON(os.Stdout, statuses)
 	}
+	if len(statuses) == 0 && quietCols != nil {
+		return nil
+	}
 	if len(statuses) == 0 {
 		fmt.Fprintf(os.Stderr, "no matching git repositories under %s\n", absRoot)
 		return nil
+	}
+	if quietCols != nil {
+		return report.Quiet(os.Stdout, statuses, quietCols, report.TableOptions{Color: useColor(cmd)})
 	}
 	return report.Table(os.Stdout, statuses, report.TableOptions{Color: useColor(cmd), Review: cmd.Bool("review") || cmd.Bool("merged")})
 }
@@ -243,4 +257,27 @@ func attachReviews(ctx context.Context, statuses []*git.Status, jobs int, baseOv
 		})
 	}
 	wg.Wait()
+}
+
+// NormalizeArgs lets -q/--quiet be used bare or with a column list, which the
+// flag library can't express directly. A bare -q becomes --quiet=REPO; when the
+// next argument is a valid column list it is attached as the value instead.
+func NormalizeArgs(args []string) []string {
+	out := make([]string, 0, len(args))
+	for i := 0; i < len(args); i++ {
+		a := args[i]
+		if a != "-q" && a != "--quiet" {
+			out = append(out, a)
+			continue
+		}
+		val := "REPO"
+		if i+1 < len(args) {
+			if _, err := report.ParseColumns(args[i+1]); err == nil {
+				val = args[i+1]
+				i++
+			}
+		}
+		out = append(out, "--quiet="+val)
+	}
+	return out
 }

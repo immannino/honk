@@ -66,6 +66,57 @@ func Table(w io.Writer, statuses []*git.Status, opts TableOptions) error {
 	return err
 }
 
+// Columns lists the column names accepted by Quiet, in display order.
+var Columns = []string{"REPO", "BRANCH", "CHANGES", "UPSTREAM", "BASE", "REBASE", "MR/PR", "AGE", "LAST COMMIT"}
+
+// ParseColumns resolves a comma-separated column list, case-insensitively.
+// "REVIEW" and "MR" are accepted for MR/PR, and "COMMIT" for LAST COMMIT.
+func ParseColumns(list string) ([]string, error) {
+	var out []string
+	for _, f := range strings.Split(list, ",") {
+		name := strings.ToUpper(strings.TrimSpace(f))
+		switch name {
+		case "":
+			continue
+		case "REVIEW", "MR", "PR":
+			name = "MR/PR"
+		case "COMMIT":
+			name = "LAST COMMIT"
+		}
+		if !slices.Contains(Columns, name) {
+			return nil, fmt.Errorf("unknown column %q (have: %s)", f, strings.Join(Columns, ", "))
+		}
+		out = append(out, name)
+	}
+	if len(out) == 0 {
+		return nil, fmt.Errorf("no columns given")
+	}
+	return out, nil
+}
+
+// Quiet writes just the chosen columns, with no header and no summary.
+func Quiet(w io.Writer, statuses []*git.Status, cols []string, opts TableOptions) error {
+	if opts.SubjectLen == 0 {
+		opts.SubjectLen = 50
+	}
+	if opts.Now.IsZero() {
+		opts.Now = time.Now()
+	}
+	p := palette{on: opts.Color}
+
+	rows := make([][]string, 0, len(statuses))
+	for _, s := range statuses {
+		base := row(s, p, opts) // REPO BRANCH CHANGES UPSTREAM BASE REBASE AGE LAST COMMIT
+		full := slices.Insert(base, 6, review(s, p))
+		cells := make([]string, len(cols))
+		for i, c := range cols {
+			cells[i] = full[slices.Index(Columns, c)]
+		}
+		rows = append(rows, cells)
+	}
+	return writeAligned(w, rows)
+}
+
 func row(s *git.Status, p palette, opts TableOptions) []string {
 	name := p.cyan(s.RelPath)
 	if s.Error != "" {

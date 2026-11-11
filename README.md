@@ -34,6 +34,8 @@ honk ~/code --behind       # only repos behind their upstream or base
 honk ~/code --only 'api*'  # only repos whose relative path matches a glob
 honk ~/code --json         # machine-readable output
 honk ~/code --filter 'updated > 1d or updated > 2026-01-01'   # by last-commit time
+honk ~/code -q            # just repo paths, no header or summary (good for scripting)
+honk ~/code -q REPO,BRANCH   # pick columns: REPO, BRANCH, CHANGES, UPSTREAM, BASE, REBASE, MR/PR, AGE, LAST COMMIT
 honk ~/code --review       # show the MR/PR tied to each branch
 ```
 
